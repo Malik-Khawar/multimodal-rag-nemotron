@@ -1,0 +1,19 @@
+[project]
+name = "multimodal-rag-nemotron"
+version = "0.1.0"
+description = "4-Stage Multimodal RAG Pipeline with NVIDIA Nemotron models"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "lancedb",
+    "sentence-transformers",
+    "rank-bm25",
+    "httpx",
+    "jinja2",
+    "python-multipart",
+    "pydantic",
+    "numpy",
+    "pillow",
+    "pypdf",
+]

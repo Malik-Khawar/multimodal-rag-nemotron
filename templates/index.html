@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4-Stage Multimodal RAG Pipeline | NVIDIA Nemotron</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0fdf4',
+                            500: '#10b981',
+                            600: '#059669',
+                            700: '#047857',
+                        },
+                        nvidia: '#76b900',
+                        darkbg: '#090d16',
+                        glasscard: 'rgba(15, 23, 42, 0.65)',
+                        glassborder: 'rgba(255, 255, 255, 0.08)',
+                    },
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #080c14;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(118, 185, 0, 0.08) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(16, 185, 129, 0.08) 0px, transparent 50%),
+                radial-gradient(at 50% 100%, rgba(59, 130, 246, 0.05) 0px, transparent 50%);
+            background-attachment: fixed;
+            color: #f1f5f9;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-panel-glow {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(118, 185, 0, 0.25);
+            box-shadow: 0 0 25px rgba(118, 185, 0, 0.1);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.4);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(118, 185, 0, 0.4);
+        }
+    </style>
+</head>
+<body class="font-sans min-h-screen flex flex-col antialiased selection:bg-nvidia selection:text-black">
+
+    <!-- Header Navigation -->
+    <header class="sticky top-0 z-40 glass-panel border-b border-white/10 px-6 py-3.5 flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-nvidia to-emerald-400 p-0.5 shadow-lg shadow-nvidia/20 flex items-center justify-center">
+                <div class="w-full h-full bg-darkbg rounded-[10px] flex items-center justify-center">
+                    <i class="fa-solid fa-brain text-nvidia text-lg"></i>
+                </div>
+            </div>
+            <div>
+                <div class="flex items-center space-x-2.5">
+                    <h1 class="text-lg font-bold tracking-tight text-white">Multimodal RAG Pipeline</h1>
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-nvidia/20 border border-nvidia/40 text-nvidia font-mono font-semibold">NVIDIA Nemotron</span>
+                </div>
+                <p class="text-xs text-slate-400">4-Stage Advanced Architecture • Khawar Hasnain Portfolio</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <div id="status-pill" class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/60 text-xs">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="text-slate-300 font-mono" id="status-text">LanceDB Active</span>
+            </div>
+            <a href="https://github.com" target="_blank" class="p-2 rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 transition-all">
+                <i class="fa-brands fa-github text-base"></i>
+            </a>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Left Column: Document Upload & Vector Stats (4 cols) -->
+        <div class="lg:col-span-4 flex flex-col space-y-6">
+
+            <!-- Vector Store Stats Cards -->
+            <div class="grid grid-cols-2 gap-3">
+                <div class="glass-panel p-4 rounded-2xl border border-white/5">
+                    <div class="flex items-center justify-between text-slate-400 text-xs mb-1">
+                        <span>Indexed Chunks</span>
+                        <i class="fa-solid fa-database text-nvidia"></i>
+                    </div>
+                    <div id="stat-chunks" class="text-2xl font-bold font-mono text-white">0</div>
+                    <div class="text-[11px] text-slate-500 mt-1">LanceDB Storage</div>
+                </div>
+                <div class="glass-panel p-4 rounded-2xl border border-white/5">
+                    <div class="flex items-center justify-between text-slate-400 text-xs mb-1">
+                        <span>Vector Dim</span>
+                        <i class="fa-solid fa-layer-group text-emerald-400"></i>
+                    </div>
+                    <div id="stat-dim" class="text-2xl font-bold font-mono text-white">384</div>
+                    <div class="text-[11px] text-slate-500 mt-1">Dense Embeddings</div>
+                </div>
+            </div>
+
+            <!-- Ingestion Panel -->
+            <div class="glass-panel p-5 rounded-2xl flex flex-col space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center space-x-2">
+                        <i class="fa-solid fa-file-arrow-up text-nvidia"></i>
+                        <span>Document Ingestion</span>
+                    </h2>
+                    <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">Stage 1 Store</span>
+                </div>
+
+                <!-- Drag and Drop Dropzone -->
+                <div id="dropzone" class="border-2 border-dashed border-slate-700/80 hover:border-nvidia/60 bg-slate-950/40 hover:bg-slate-900/50 transition-all rounded-xl p-6 flex flex-col items-center justify-center text-center cursor-pointer group">
+                    <input type="file" id="file-input" class="hidden" accept=".txt,.pdf,.md,.json,.csv,.png,.jpg,.jpeg">
+                    <div class="w-12 h-12 rounded-full bg-slate-800/80 group-hover:bg-nvidia/20 text-slate-400 group-hover:text-nvidia flex items-center justify-center mb-3 transition-all">
+                        <i class="fa-solid fa-cloud-arrow-up text-xl"></i>
+                    </div>
+                    <p class="text-xs font-semibold text-slate-200">Drag & drop files here, or <span class="text-nvidia">browse</span></p>
+                    <p class="text-[11px] text-slate-500 mt-1">Supports PDF, TXT, MD, Images (Auto-Indexed)</p>
+                </div>
+
+                <!-- Upload Progress / Status -->
+                <div id="upload-status" class="hidden p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center space-x-3 text-xs">
+                    <i id="upload-spinner" class="fa-solid fa-circle-notch fa-spin text-nvidia"></i>
+                    <span id="upload-text" class="text-slate-300">Indexing document into LanceDB...</span>
+                </div>
+
+                <!-- Pipeline Architecture Badge List -->
+                <div class="pt-2 border-t border-white/5 space-y-2 text-xs">
+                    <div class="text-[11px] font-semibold text-slate-400 uppercase">4-Stage Pipeline Stack</div>
+                    <div class="flex flex-col space-y-1.5 font-mono text-[11px]">
+                        <div class="flex justify-between items-center px-2.5 py-1 rounded bg-slate-900/60 text-slate-300">
+                            <span class="text-slate-400">1. Hybrid Retrieval</span>
+                            <span class="text-nvidia">LanceDB + BM25</span>
+                        </div>
+                        <div class="flex justify-between items-center px-2.5 py-1 rounded bg-slate-900/60 text-slate-300">
+                            <span class="text-slate-400">2. Cross Re-Ranker</span>
+                            <span class="text-emerald-400">Nemotron-VL-1B</span>
+                        </div>
+                        <div class="flex justify-between items-center px-2.5 py-1 rounded bg-slate-900/60 text-slate-300">
+                            <span class="text-slate-400">3. Multimodal Model</span>
+                            <span class="text-cyan-400">Nemotron-3-Omni</span>
+                        </div>
+                        <div class="flex justify-between items-center px-2.5 py-1 rounded bg-slate-900/60 text-slate-300">
+                            <span class="text-slate-400">4. Auto-Failover</span>
+                            <span class="text-amber-400">Ling-3.0-Flash</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Interactive RAG Chat & Multimodal Interface (8 cols) -->
+        <div class="lg:col-span-8 flex flex-col glass-panel rounded-2xl border border-white/10 overflow-hidden h-[740px]">
+            
+            <!-- Chat Window Header -->
+            <div class="px-5 py-3.5 bg-slate-900/80 border-b border-white/5 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <i class="fa-solid fa-comments text-nvidia"></i>
+                    <h2 class="text-sm font-bold text-white">Multimodal RAG Assistant</h2>
+                </div>
+                <div class="flex items-center space-x-2 text-xs text-slate-400">
+                    <span>Model:</span>
+                    <span class="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[11px]">nvidia/nemotron-3</span>
+                </div>
+            </div>
+
+            <!-- Messages Area -->
+            <div id="chat-messages" class="flex-1 p-5 overflow-y-auto custom-scrollbar space-y-4">
+                
+                <!-- Welcome Message -->
+                <div class="flex space-x-3 max-w-2xl">
+                    <div class="w-8 h-8 rounded-lg bg-nvidia/20 border border-nvidia/40 flex items-center justify-center flex-shrink-0">
+                        <i class="fa-solid fa-robot text-nvidia text-xs"></i>
+                    </div>
+                    <div class="flex flex-col space-y-2">
+                        <div class="bg-slate-900/90 border border-slate-800 text-slate-200 p-4 rounded-2xl rounded-tl-none text-sm leading-relaxed shadow-lg">
+                            <p class="font-semibold text-white mb-1">Welcome to the 4-Stage Multimodal RAG Pipeline!</p>
+                            <p class="text-slate-300">Ask any question about your indexed documents or attach an image for visual reasoning. Each response includes a complete interactive 4-stage RAG execution trace.</p>
+                            
+                            <!-- Sample Prompts -->
+                            <div class="mt-3 pt-3 border-t border-slate-800 flex flex-wrap gap-2">
+                                <button onclick="sendQuickQuery('Explain the 4-Stage RAG Pipeline architecture.')" class="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-nvidia transition-all border border-slate-700/60">
+                                    <i class="fa-solid fa-lightbulb text-nvidia mr-1"></i> Explain 4-Stage Architecture
+                                </button>
+                                <button onclick="sendQuickQuery('What models are used in Stage 2 and Stage 3?')" class="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-nvidia transition-all border border-slate-700/60">
+                                    <i class="fa-solid fa-microchip text-emerald-400 mr-1"></i> Nemotron Model Stack
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Multimodal Image Attachment Preview Bar -->
+            <div id="image-preview-container" class="hidden px-5 py-2 bg-slate-900/90 border-t border-white/5 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <img id="image-preview" class="w-10 h-10 rounded-lg object-cover border border-nvidia/50" src="" alt="Preview">
+                    <div>
+                        <div class="text-xs font-semibold text-white">Multimodal Image Attached</div>
+                        <div class="text-[11px] text-slate-400">Invoking Stage 3 Nemotron-3-Nano-Omni</div>
+                    </div>
+                </div>
+                <button onclick="removeAttachedImage()" class="text-slate-400 hover:text-red-400 text-sm">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Chat Input Controls -->
+            <div class="p-4 bg-slate-900/90 border-t border-white/5">
+                <form id="chat-form" class="flex items-center space-x-3">
+                    <!-- Image attachment button -->
+                    <label for="chat-image-input" class="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-nvidia cursor-pointer transition-all" title="Attach Image for Multimodal Reasoning">
+                        <i class="fa-solid fa-image text-sm"></i>
+                        <input type="file" id="chat-image-input" accept="image/*" class="hidden" onchange="handleImageSelected(event)">
+                    </label>
+
+                    <!-- Text input -->
+                    <input type="text" id="chat-input" placeholder="Ask a question or enter query..." class="flex-1 bg-slate-950/80 border border-slate-800 focus:border-nvidia text-white text-sm rounded-xl px-4 py-2.5 focus:outline-none transition-all placeholder:text-slate-500">
+
+                    <!-- Send button -->
+                    <button type="submit" id="send-btn" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-nvidia to-emerald-600 hover:from-nvidia hover:to-emerald-500 text-black font-bold text-sm shadow-lg shadow-nvidia/20 transition-all flex items-center space-x-2">
+                        <span>Send</span>
+                        <i class="fa-solid fa-paper-plane text-xs"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Interactive RAG Trace Modal / Drawer -->
+    <div id="trace-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="glass-panel-glow w-full max-w-4xl rounded-2xl overflow-hidden flex flex-col max-h-[85vh] border border-white/10">
+            <!-- Modal Header -->
+            <div class="px-6 py-4 bg-slate-900/90 border-b border-white/10 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <i class="fa-solid fa-code-branch text-nvidia text-lg"></i>
+                    <div>
+                        <h3 class="text-base font-bold text-white">Structured RAG Execution Trace</h3>
+                        <p class="text-xs text-slate-400">Deep inspection across Stages 1 through 4</p>
+                    </div>
+                </div>
+                <button onclick="closeTraceModal()" class="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition-all">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Modal Body Content -->
+            <div class="p-6 overflow-y-auto custom-scrollbar space-y-6 text-sm">
+                
+                <!-- Timing Summary Row -->
+                <div class="grid grid-cols-4 gap-3 font-mono text-xs">
+                    <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">TOTAL LATENCY</span>
+                        <span id="trace-total-latency" class="text-lg font-bold text-white">0 ms</span>
+                    </div>
+                    <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">STAGE 1 HYBRID</span>
+                        <span id="trace-stage1-latency" class="text-emerald-400 font-semibold">0 ms</span>
+                    </div>
+                    <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">STAGE 2 RERANK</span>
+                        <span id="trace-stage2-latency" class="text-cyan-400 font-semibold">0 ms</span>
+                    </div>
+                    <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">STAGE 3/4 SYNTHESIS</span>
+                        <span id="trace-stage3-latency" class="text-amber-400 font-semibold">0 ms</span>
+                    </div>
+                </div>
+
+                <!-- Stage 1 Breakdown -->
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <h4 class="font-bold text-white text-xs uppercase tracking-wider flex items-center space-x-2">
+                            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            <span>Stage 1: Hybrid Retrieval (LanceDB Dense + BM25 Sparse)</span>
+                        </h4>
+                    </div>
+                    <div class="overflow-x-auto rounded-xl border border-slate-800">
+                        <table class="w-full text-left text-xs font-mono">
+                            <thead class="bg-slate-900 text-slate-400 text-[11px]">
+                                <tr>
+                                    <th class="p-2.5">Passage ID</th>
+                                    <th class="p-2.5">Dense Vector Score</th>
+                                    <th class="p-2.5">BM25 Sparse Score</th>
+                                    <th class="p-2.5">RRF Score</th>
+                                    <th class="p-2.5">Hybrid Score</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trace-stage1-table" class="divide-y divide-slate-800 bg-slate-950/60 text-slate-300">
+                                <!-- Dynamic rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Stage 2 Breakdown -->
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <h4 class="font-bold text-white text-xs uppercase tracking-wider flex items-center space-x-2">
+                            <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+                            <span>Stage 2: Nemotron Cross-Encoder Re-Ranking</span>
+                        </h4>
+                        <span id="trace-stage2-model" class="text-xs font-mono text-cyan-300 bg-cyan-950/50 px-2 py-0.5 rounded border border-cyan-800"></span>
+                    </div>
+                    <div id="trace-stage2-list" class="space-y-2">
+                        <!-- Dynamic list -->
+                    </div>
+                </div>
+
+                <!-- Stage 3 & 4 Breakdown -->
+                <div class="space-y-2">
+                    <h4 class="font-bold text-white text-xs uppercase tracking-wider flex items-center space-x-2">
+                        <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                        <span>Stage 3 & 4: Nemotron Multimodal Synthesis & Failover</span>
+                    </h4>
+                    <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-xs space-y-2 font-mono">
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">Primary Model Requested:</span>
+                            <span id="trace-model-requested" class="text-slate-200"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">Final Model Executed:</span>
+                            <span id="trace-model-used" class="text-nvidia font-bold"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">Failover Triggered:</span>
+                            <span id="trace-failover-status" class="px-2 py-0.5 rounded"></span>
+                        </div>
+                        <div id="trace-failover-reason-box" class="hidden text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-800/60 mt-1">
+                            <span class="font-bold">Failover Reason: </span><span id="trace-failover-reason"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Raw JSON Accordion -->
+                <div class="pt-3 border-t border-slate-800">
+                    <button onclick="toggleRawJson()" class="text-xs text-slate-400 hover:text-nvidia font-mono flex items-center space-x-2">
+                        <i class="fa-solid fa-code"></i>
+                        <span>Toggle Raw JSON Trace Object</span>
+                    </button>
+                    <pre id="raw-json-box" class="hidden mt-2 p-4 rounded-xl bg-slate-950 font-mono text-xs text-emerald-400 overflow-x-auto max-h-60 border border-slate-800"></pre>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+        let currentImageBase64 = null;
+        let activeTraceData = null;
+
+        // Initialize Stats on Load
+        fetchStats();
+
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    document.getElementById('stat-chunks').innerText = data.stats.total_chunks || 0;
+                    document.getElementById('stat-dim').innerText = data.stats.vector_dim || 384;
+                    document.getElementById('status-text').innerText = data.stats.lancedb_active ? 'LanceDB Active' : 'Memory Store Active';
+                }
+            } catch (e) {
+                console.error('Failed to fetch stats:', e);
+            }
+        }
+
+        // Dropzone Setup
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('file-input');
+
+        dropzone.addEventListener('click', () => fileInput.click());
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('border-nvidia', 'bg-slate-900/80');
+        });
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('border-nvidia', 'bg-slate-900/80');
+        });
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('border-nvidia', 'bg-slate-900/80');
+            if (e.dataTransfer.files.length > 0) {
+                uploadFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                uploadFile(e.target.files[0]);
+            }
+        });
+
+        async function uploadFile(file) {
+            const statusBox = document.getElementById('upload-status');
+            const statusText = document.getElementById('upload-text');
+            statusBox.classList.remove('hidden');
+            statusText.innerText = `Indexing '${file.name}' into LanceDB...`;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    statusText.innerHTML = `<span class="text-emerald-400 font-semibold"><i class="fa-solid fa-circle-check mr-1"></i> Indexed ${data.chunks_indexed} chunks!</span>`;
+                    fetchStats();
+                } else {
+                    statusText.innerHTML = `<span class="text-red-400 font-semibold"><i class="fa-solid fa-triangle-exclamation mr-1"></i> ${data.detail || 'Upload failed'}</span>`;
+                }
+            } catch (err) {
+                statusText.innerHTML = `<span class="text-red-400 font-semibold"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Upload error</span>`;
+            }
+        }
+
+        // Image Selection for Chat
+        function handleImageSelected(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                currentImageBase64 = e.target.result;
+                document.getElementById('image-preview').src = currentImageBase64;
+                document.getElementById('image-preview-container').classList.remove('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function removeAttachedImage() {
+            currentImageBase64 = null;
+            document.getElementById('chat-image-input').value = '';
+            document.getElementById('image-preview-container').classList.add('hidden');
+        }
+
+        function sendQuickQuery(text) {
+            document.getElementById('chat-input').value = text;
+            document.getElementById('chat-form').dispatchEvent(new Event('submit', { cancelable: true }));
+        }
+
+        // Chat Form Submission
+        document.getElementById('chat-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            const queryText = input.value.trim();
+            if (!queryText) return;
+
+            // Render User Message
+            appendUserMessage(queryText, currentImageBase64);
+            
+            const imagePayload = currentImageBase64;
+            input.value = '';
+            removeAttachedImage();
+
+            // Render Loading Assistant Bubble
+            const msgId = 'msg-' + Date.now();
+            appendLoadingAssistantMessage(msgId);
+
+            try {
+                const res = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: queryText,
+                        multimodal_image: imagePayload,
+                        top_k: 5
+                    })
+                });
+
+                const data = await res.json();
+                if (res.ok && data.status === 'success') {
+                    updateAssistantMessage(msgId, data.answer, data.trace);
+                } else {
+                    updateAssistantErrorMessage(msgId, data.detail || 'Failed to get answer');
+                }
+            } catch (err) {
+                updateAssistantErrorMessage(msgId, 'Network or API error occurred.');
+            }
+        });
+
+        function appendUserMessage(text, imageSrc) {
+            const container = document.getElementById('chat-messages');
+            const userHtml = `
+                <div class="flex justify-end space-x-3">
+                    <div class="bg-gradient-to-r from-nvidia to-emerald-600 text-black font-medium p-4 rounded-2xl rounded-tr-none text-sm max-w-xl shadow-lg">
+                        ${imageSrc ? `<img src="${imageSrc}" class="w-32 h-32 object-cover rounded-lg mb-2 border border-black/20">` : ''}
+                        <p>${escapeHtml(text)}</p>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', userHtml);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function appendLoadingAssistantMessage(id) {
+            const container = document.getElementById('chat-messages');
+            const loadingHtml = `
+                <div id="${id}" class="flex space-x-3 max-w-2xl">
+                    <div class="w-8 h-8 rounded-lg bg-nvidia/20 border border-nvidia/40 flex items-center justify-center flex-shrink-0">
+                        <i class="fa-solid fa-robot text-nvidia text-xs"></i>
+                    </div>
+                    <div class="bg-slate-900/90 border border-slate-800 text-slate-200 p-4 rounded-2xl rounded-tl-none text-sm space-y-2 shadow-lg flex items-center space-x-3">
+                        <i class="fa-solid fa-spinner fa-spin text-nvidia"></i>
+                        <span class="text-slate-400 font-mono text-xs">Executing 4-Stage RAG Pipeline...</span>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', loadingHtml);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateAssistantMessage(id, answer, trace) {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            const traceJson = JSON.stringify(trace).replace(/'/g, "&apos;");
+
+            const formattedAnswer = escapeHtml(answer).replace(/\n/g, '<br>');
+
+            el.innerHTML = `
+                <div class="w-8 h-8 rounded-lg bg-nvidia/20 border border-nvidia/40 flex items-center justify-center flex-shrink-0">
+                    <i class="fa-solid fa-robot text-nvidia text-xs"></i>
+                </div>
+                <div class="flex flex-col space-y-2.5 flex-1">
+                    <div class="bg-slate-900/90 border border-slate-800 text-slate-200 p-4 rounded-2xl rounded-tl-none text-sm leading-relaxed shadow-lg">
+                        <div>${formattedAnswer}</div>
+                    </div>
+                    <div class="flex items-center space-x-3 text-xs">
+                        <button onclick='openTraceModal(${traceJson})' class="px-3 py-1 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-nvidia hover:text-white font-mono transition-all flex items-center space-x-1.5">
+                            <i class="fa-solid fa-sliders text-xs"></i>
+                            <span>View 4-Stage Trace (${trace.total_latency_ms}ms)</span>
+                        </button>
+                        <span class="text-[11px] text-slate-500 font-mono">Model: ${trace.stage3_and_4_synthesis.model_used}</span>
+                    </div>
+                </div>
+            `;
+            const container = document.getElementById('chat-messages');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateAssistantErrorMessage(id, errorMsg) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.innerHTML = `
+                <div class="w-8 h-8 rounded-lg bg-red-500/20 border border-red-500/40 flex items-center justify-center flex-shrink-0">
+                    <i class="fa-solid fa-triangle-exclamation text-red-400 text-xs"></i>
+                </div>
+                <div class="bg-slate-900/90 border border-red-900/50 text-red-300 p-4 rounded-2xl rounded-tl-none text-sm shadow-lg">
+                    ${escapeHtml(errorMsg)}
+                </div>
+            `;
+        }
+
+        // Trace Modal Handlers
+        function openTraceModal(trace) {
+            activeTraceData = trace;
+            document.getElementById('trace-total-latency').innerText = trace.total_latency_ms + ' ms';
+            document.getElementById('trace-stage1-latency').innerText = trace.stage1_hybrid_retrieval.latency_ms + ' ms';
+            document.getElementById('trace-stage2-latency').innerText = trace.stage2_nemotron_reranking.latency_ms + ' ms';
+            document.getElementById('trace-stage3-latency').innerText = trace.stage3_and_4_synthesis.latency_ms + ' ms';
+
+            // Stage 1 Table
+            const s1Table = document.getElementById('trace-stage1-table');
+            s1Table.innerHTML = '';
+            (trace.stage1_hybrid_retrieval.candidates || []).forEach(c => {
+                s1Table.innerHTML += `
+                    <tr>
+                        <td class="p-2.5 text-slate-300 font-bold">${c.id}</td>
+                        <td class="p-2.5 text-emerald-400">${c.dense_score}</td>
+                        <td class="p-2.5 text-cyan-400">${c.sparse_score}</td>
+                        <td class="p-2.5 text-amber-400">${c.rrf_score}</td>
+                        <td class="p-2.5 text-nvidia font-bold">${c.score}</td>
+                    </tr>
+                `;
+            });
+
+            // Stage 2 List
+            const s2List = document.getElementById('trace-stage2-list');
+            document.getElementById('trace-stage2-model').innerText = trace.stage2_nemotron_reranking.model_used;
+            s2List.innerHTML = '';
+            (trace.stage2_nemotron_reranking.top_chunks || []).forEach((c, idx) => {
+                s2List.innerHTML += `
+                    <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs font-mono">
+                        <div class="flex items-center space-x-3 overflow-hidden">
+                            <span class="w-5 h-5 rounded-full bg-cyan-950 text-cyan-400 flex items-center justify-center text-[10px] font-bold">#${idx+1}</span>
+                            <span class="text-slate-300 truncate max-w-lg">${escapeHtml(c.text)}</span>
+                        </div>
+                        <div class="text-right flex-shrink-0 pl-3">
+                            <span class="text-slate-400 text-[10px] block">RERANK SCORE</span>
+                            <span class="text-cyan-400 font-bold">${c.rerank_score}</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // Stage 3 & 4
+            const s3 = trace.stage3_and_4_synthesis;
+            document.getElementById('trace-model-requested').innerText = s3.model_requested;
+            document.getElementById('trace-model-used').innerText = s3.model_used;
+
+            const failoverBadge = document.getElementById('trace-failover-status');
+            if (s3.failover_triggered) {
+                failoverBadge.className = 'px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-700';
+                failoverBadge.innerText = 'YES (Failover Active)';
+                document.getElementById('trace-failover-reason-box').classList.remove('hidden');
+                document.getElementById('trace-failover-reason').innerText = s3.failover_reason || 'Rate limit / timeout';
+            } else {
+                failoverBadge.className = 'px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800';
+                failoverBadge.innerText = 'NO (Primary Succeeded)';
+                document.getElementById('trace-failover-reason-box').classList.add('hidden');
+            }
+
+            document.getElementById('raw-json-box').innerText = JSON.stringify(trace, null, 2);
+
+            document.getElementById('trace-modal').classList.remove('hidden');
+        }
+
+        function closeTraceModal() {
+            document.getElementById('trace-modal').classList.add('hidden');
+        }
+
+        function toggleRawJson() {
+            const box = document.getElementById('raw-json-box');
+            box.classList.toggle('hidden');
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>
