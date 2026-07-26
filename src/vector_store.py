@@ -27,9 +27,29 @@ class LanceDBManager:
         self.db_path.mkdir(parents=True, exist_ok=True)
         self.db = lancedb.connect(str(self.db_path))
 
+    def _get_table_names(self) -> List[str]:
+        """Helper method to list table names as strings compatible across LanceDB versions."""
+        try:
+            return list(self.db.table_names())
+        except Exception:
+            pass
+
+        if hasattr(self.db, "list_tables"):
+            res = self.db.list_tables()
+            names = []
+            for item in res:
+                if isinstance(item, str):
+                    names.append(item)
+                elif hasattr(item, "name"):
+                    names.append(getattr(item, "name"))
+                else:
+                    names.append(str(item))
+            return names
+        return []
+
     def get_table(self, table_name: str = DEFAULT_TABLE_NAME):
         """Get an existing table from LanceDB."""
-        if table_name in self.db.table_names():
+        if table_name in self._get_table_names():
             return self.db.open_table(table_name)
         return None
 
@@ -44,12 +64,12 @@ class LanceDBManager:
         Initialize or reset a table in LanceDB.
         If mode is 'overwrite', drops the table if it already exists.
         """
-        existing_tables = self.db.table_names()
+        existing_tables = self._get_table_names()
         if mode == "overwrite" and table_name in existing_tables:
             self.db.drop_table(table_name)
             logger.info(f"Dropped existing table '{table_name}'.")
 
-        if table_name in self.db.table_names():
+        if table_name in self._get_table_names():
             logger.info(f"Table '{table_name}' already exists.")
             return self.db.open_table(table_name)
 
@@ -111,7 +131,7 @@ class LanceDBManager:
             }
             records.append(record)
 
-        if table_name not in self.db.table_names():
+        if table_name not in self._get_table_names():
             # Initialize with first record
             self.init_table(table_name, sample_chunk=chunks[0], sample_vector=vectors[0], mode="overwrite")
             table = self.db.open_table(table_name)
@@ -156,9 +176,11 @@ class LanceDBManager:
 
         # Try LanceDB FTS index search
         try:
-            # Create FTS index if not created
             try:
-                table.create_fts_index("content", replace=False)
+                if hasattr(lancedb.index, "FTS"):
+                    table.create_index(config=lancedb.index.FTS(), field="content", replace=False)
+                else:
+                    table.create_fts_index("content", replace=False)
             except Exception:
                 pass
             

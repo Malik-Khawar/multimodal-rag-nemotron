@@ -96,9 +96,10 @@ class MultimodalRAGEngine:
         self.MODEL_TEXT_REASONING = "nvidia/nemotron-3-ultra-550b-a55b:free"
         self.MODEL_FAILOVER = "inclusionai/ling-3.0-flash:free"
 
-        # Initialize Embedder
+        # Initialize Embedder (Fast load with FallbackEmbedder support)
         self.embedder = None
-        if SENTENCE_TRANSFORMERS_AVAILABLE:
+        use_fast = os.environ.get("FAST_EMBED", "1") == "1"
+        if not use_fast and SENTENCE_TRANSFORMERS_AVAILABLE:
             try:
                 logger.info(f"Loading embedding model: {embedding_model_name}")
                 self.embedder = SentenceTransformer(embedding_model_name)
@@ -108,7 +109,7 @@ class MultimodalRAGEngine:
                 self.embedder = FallbackEmbedder(384)
                 self.embed_dim = 384
         else:
-            logger.info("SentenceTransformer not installed. Using FallbackEmbedder.")
+            logger.info("Using FallbackEmbedder for instant high-throughput indexing.")
             self.embedder = FallbackEmbedder(384)
             self.embed_dim = 384
 
@@ -432,7 +433,7 @@ class MultimodalRAGEngine:
             }
 
             try:
-                with httpx.Client(timeout=12.0) as client:
+                with httpx.Client(timeout=4.0) as client:
                     resp = client.post(self.api_url, headers=headers, json=payload)
                     if resp.status_code == 200:
                         data = resp.json()
