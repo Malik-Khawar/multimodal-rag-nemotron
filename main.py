@@ -8,6 +8,11 @@ import sys
 import json
 import time
 
+# Ensure UTF-8 output encoding on Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Ensure src package is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.rag_engine import MultimodalRAGEngine
@@ -15,7 +20,7 @@ from src.rag_engine import MultimodalRAGEngine
 
 def run_benchmark():
     print("=" * 75)
-    print(" 🚀 4-STAGE MULTIMODAL RAG PIPELINE - BENCHMARK & DEMONSTRATION")
+    print(" [RAG PIPELINE] 4-STAGE MULTIMODAL RAG PIPELINE - BENCHMARK DEMO")
     print(" Powered by NVIDIA Nemotron Models & LanceDB Hybrid Search")
     print("=" * 75)
 
@@ -87,7 +92,7 @@ def run_benchmark():
 
     for idx, q_info in enumerate(benchmark_queries):
         print(f"\n" + "-" * 75)
-        print(f" 🔍 BENCHMARK RUN {idx+1}: {q_info['title']}")
+        print(f" [*] BENCHMARK RUN {idx+1}: {q_info['title']}")
         print(f" Query: \"{q_info['query']}\"")
         if q_info['image']:
             print(" Multimodal Image: Attached (Base64)")
@@ -98,14 +103,14 @@ def run_benchmark():
 
         # Print Stage 1 Trace
         s1 = trace["stage1_hybrid_retrieval"]
-        print(f"\n ▸ Stage 1: Hybrid Retrieval ({s1['latency_ms']} ms)")
+        print(f"\n   Stage 1: Hybrid Retrieval ({s1['latency_ms']} ms)")
         print(f"   Retrieved {s1['candidate_count']} candidate passages:")
         for cand in s1["candidates"][:3]:
             print(f"   - [{cand['id']}] Dense: {cand['dense_score']} | Sparse: {cand['sparse_score']} | Hybrid Score: {cand['score']} | Src: {cand['source']}")
 
         # Print Stage 2 Trace
         s2 = trace["stage2_nemotron_reranking"]
-        print(f"\n ▸ Stage 2: Nemotron Re-Ranking ({s2['latency_ms']} ms)")
+        print(f"\n   Stage 2: Nemotron Re-Ranking ({s2['latency_ms']} ms)")
         print(f"   Model: {s2['model_used']} (Fallback Used: {s2['fallback_used']})")
         if s2['fallback_used']:
             print(f"   Fallback Reason: {s2['fallback_reason']}")
@@ -114,7 +119,7 @@ def run_benchmark():
 
         # Print Stage 3/4 Trace
         s3 = trace["stage3_and_4_synthesis"]
-        print(f"\n ▸ Stage 3 & 4: Multimodal Synthesis & Failover ({s3['latency_ms']} ms)")
+        print(f"\n   Stage 3 & 4: Multimodal Synthesis & Failover ({s3['latency_ms']} ms)")
         print(f"   Requested Model : {s3['model_requested']}")
         print(f"   Executed Model  : {s3['model_used']}")
         print(f"   Failover Active : {s3['failover_triggered']}")
@@ -122,12 +127,12 @@ def run_benchmark():
             print(f"   Failover Reason : {s3['failover_reason']}")
 
         # Print Answer Summary
-        print("\n 💬 Synthesized Response:")
+        print("\n [ANSWER] Synthesized Response:")
         print(f" {res['answer']}")
-        print(f"\n ⏱ Total Execution Time: {trace['total_latency_ms']} ms")
+        print(f"\n Total Execution Time: {trace['total_latency_ms']} ms")
 
     print("\n" + "=" * 75)
-    print(" ✅ BENCHMARK COMPLETED SUCCESSFULLY!")
+    print(" [SUCCESS] BENCHMARK COMPLETED SUCCESSFULLY!")
     print("=" * 75)
 
 
